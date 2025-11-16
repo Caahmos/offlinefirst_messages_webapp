@@ -5,6 +5,7 @@ import { useMessages } from "./hooks/useMessages";
 import { useMutation } from "@tanstack/react-query";
 import { sendMessageSupabase } from "./services/sendMessages";
 import { testConnection } from "./services/testSupabseConection";
+import { useAuth } from "./hooks/useAuth";
 
 function useSendMessage() {
   return useMutation({
@@ -33,6 +34,7 @@ export default function MessageUI() {
   const sendMessage = useSendMessage();
   const online = useOnlineStatus();
   const [text, setText] = useState("");
+  const { logout, userData } = useAuth(); // puxando userData também
 
   useEffect(() => {
     testConnection();
@@ -92,9 +94,32 @@ export default function MessageUI() {
     }
   };
 
+  const handleLogout = async () => {
+    console.log("[Logout] Iniciando logout...");
+    await logout();
+    console.log("[Logout] Usuário deslogado!");
+  };
+
   return (
     <div style={{ maxWidth: 400, margin: "40px auto" }}>
-      <h2>Mensagens (Offline First)</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2>Mensagens (Offline First)</h2>
+        {userData && (
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "none",
+              background: "#ff4d4d",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Logout
+          </button>
+        )}
+      </div>
 
       <p>Status:
         <strong style={{ color: online ? "green" : "red" }}>
