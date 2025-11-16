@@ -1,7 +1,7 @@
 // src/components/Pages/Register.tsx
 import { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export default function Register() {
   const { register } = useAuth();
@@ -129,6 +129,7 @@ export default function Register() {
         >
           {loading ? "Registrando..." : "Registrar"}
         </button>
+        <Link style={{ paddingTop: 50 }} to="/">Clque aqui para fazer login</Link>
       </form>
     </div>
   );

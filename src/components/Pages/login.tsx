@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { Link } from "react-router-dom";
 
 export default function Login() {
   const { login, authLoading } = useAuth();
@@ -98,6 +99,7 @@ export default function Login() {
         >
           {authLoading ? "Entrando..." : "Entrar"}
         </button>
+        <Link style={{ paddingTop: 50 }} to="/register">Clque aqui para se registrar</Link>
       </form>
     </div>
   );
