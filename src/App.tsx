@@ -6,6 +6,7 @@ import { useMutation } from "@tanstack/react-query";
 import { sendMessageSupabase } from "./services/sendMessages";
 import { testConnection } from "./services/testSupabseConection";
 import { useAuth } from "./hooks/useAuth";
+import { supabase } from "./supabaseClient";
 
 function useSendMessage() {
   return useMutation({
@@ -41,6 +42,24 @@ export default function MessageUI() {
   }, []);
 
   useEffect(() => {
+    const logSession = async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("[Session] Erro ao pegar sessão:", error);
+        return;
+      }
+
+      const session = data.session;
+      console.log("[Session] JWT:", session?.access_token);
+      console.log("[Session] userData:", userData);
+      console.log("[Session] user UID:", session?.user?.id);
+      console.log("[Session] user email:", session?.user?.email);
+    };
+
+    logSession();
+  }, [userData]);
+
+  useEffect(() => {
     if (!online) {
       console.log("[Reconect] Ainda offline, nada a enviar");
       return;
@@ -71,7 +90,7 @@ export default function MessageUI() {
 
     const msg: Message = {
       id: crypto.randomUUID(),
-      user_id: crypto.randomUUID(),
+      user_id: userData?.user_id as string,
       content: text,
       client_created_at: now,
       created_at: now,
