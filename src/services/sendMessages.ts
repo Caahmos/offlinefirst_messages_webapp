@@ -3,8 +3,8 @@ import { supabase } from "../supabaseClient";
 export async function sendMessageSupabase(msg: any) {
   console.log("📤 Enviando mensagem para Supabase:", msg);
 
-  // Remover campos que não devem ser enviados
-  const { id, pending, created_at, ...clean } = msg;
+  // Remover apenas campos que Supabase não precisa
+  const { pending, ...clean } = msg; // manter id e created_at
 
   const payload = {
     ...clean,
@@ -16,14 +16,15 @@ export async function sendMessageSupabase(msg: any) {
   const { data, error } = await supabase
     .from("messages")
     .insert(payload)
-    .select("*");
+    .select("*")
+    .single(); // pega só 1 registro
 
   if (error) {
     console.error("❌ ERRO NO INSERT DO SUPABASE:", error);
     throw error;
   }
 
-  console.log("✅ Mensagem inserida no Supabase:", data[0]);
+  console.log("✅ Mensagem inserida no Supabase:", data);
 
-  return data[0];
+  return data;
 }

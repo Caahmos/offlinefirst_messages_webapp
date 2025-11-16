@@ -11,21 +11,14 @@ import { supabase } from "./supabaseClient";
 function useSendMessage() {
   return useMutation({
     mutationFn: sendMessageSupabase,
-
     onSuccess: async (serverMsg, originalMsg) => {
-      console.log("[onSuccess] Supabase retornou:", serverMsg);
-
       await db.messages.update(originalMsg.id, {
         pending: 0,
         created_at: serverMsg.created_at ?? originalMsg.created_at,
       });
-
-      console.log("[onSuccess] Mensagem marcada como enviada no Dexie");
     },
-
     onError: (err, originalMsg) => {
-      console.error("[useSendMessage] ERRO enviando mensagem:", err);
-      console.log("[useSendMessage] Ela continua pendente:", originalMsg.id);
+      console.error("[useSendMessage] ERRO enviando:", err, originalMsg.id);
     },
   });
 }
@@ -35,50 +28,92 @@ export default function MessageUI() {
   const sendMessage = useSendMessage();
   const online = useOnlineStatus();
   const [text, setText] = useState("");
-  const { logout, userData } = useAuth(); // puxando userData também
+  const { logout, userData } = useAuth();
 
-  useEffect(() => {
-    testConnection();
-  }, []);
+  // 🔹 Testa conexão
+  useEffect(() => { testConnection(); }, []);
 
+  // 🔹 Fetch inicial das mensagens do Supabase
   useEffect(() => {
-    const logSession = async () => {
+    if (!userData) return;
+
+    const fetchMessages = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("messages")
+          .select("*")
+          .order("created_at", { ascending: true });
+
+        if (error) throw error;
+
+        for (const msg of data) {
+          const exists = await db.messages.get(msg.id);
+          if (!exists) await db.messages.add({ ...msg, pending: 0 });
+        }
+      } catch (err) {
+        console.error("[fetchMessages] Erro:", err);
+      }
+    };
+
+    fetchMessages();
+  }, [userData]);
+
+  // 🔹 Realtime listener
+  useEffect(() => {
+    // função async interna
+    const fetchData = async () => {
       const { data, error } = await supabase.auth.getSession();
       if (error) {
-        console.error("[Session] Erro ao pegar sessão:", error);
+        console.error("Erro ao pegar sessão:", error);
         return;
       }
 
       const session = data.session;
-      console.log("[Session] JWT:", session?.access_token);
-      console.log("[Session] userData:", userData);
-      console.log("[Session] user UID:", session?.user?.id);
-      console.log("[Session] user email:", session?.user?.email);
+      console.log("JWT:", session?.access_token);
+      console.log("user UID:", session?.user?.id);
     };
 
-    logSession();
-  }, [userData]);
+    fetchData(); // chama a função async
+  }, []);
 
   useEffect(() => {
-    if (!online) {
-      console.log("[Reconect] Ainda offline, nada a enviar");
-      return;
-    }
+    if (!userData) return;
 
-    console.log("[Reconect] Voltou online! Enviando pendentes...");
+    // Cria o canal
+    const channel = supabase
+      .channel("public:messages") // nome do canal, pode ser qualquer string
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        async (payload) => {
+          const newMsg = payload.new as Message;
+
+          console.log("[Realtime] Nova mensagem recebida:", newMsg);
+
+          // Salva no Dexie se ainda não existe
+          const exists = await db.messages.get(newMsg.id);
+          if (!exists) {
+            await db.messages.add({ ...newMsg, pending: 0 });
+          }
+        }
+      )
+      .subscribe();
+
+    // Cleanup
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userData]);
+
+  // 🔹 Envio pendente offline → online
+  useEffect(() => {
+    if (!online) return;
 
     (async () => {
       const pendentes = await db.messages.where("pending").equals(1).toArray();
-
-      console.log(`[Reconect] Encontradas ${pendentes.length} pendentes`);
-
       for (const msg of pendentes) {
-        try {
-          console.log("[Reconect] Enviando pendente:", msg.id);
-          await sendMessage.mutateAsync(msg);
-        } catch (err) {
-          console.error("[Reconect] Falhou ao enviar pendente:", msg.id, err);
-        }
+        try { await sendMessage.mutateAsync(msg); }
+        catch (err) { console.error("[Reconect] Falha pendente:", msg.id, err); }
       }
     })();
   }, [online]);
@@ -87,7 +122,6 @@ export default function MessageUI() {
     if (!text.trim()) return;
 
     const now = new Date().toISOString();
-
     const msg: Message = {
       id: crypto.randomUUID(),
       user_id: userData?.user_id as string,
@@ -97,27 +131,16 @@ export default function MessageUI() {
       pending: online ? 0 : 1,
     };
 
-    console.log("[handleSend] Salvando local:", msg);
     await db.messages.add(msg);
     setText("");
 
     if (online) {
-      console.log("[handleSend] Online → enviando ao Supabase:", msg.id);
-      try {
-        await sendMessage.mutateAsync(msg);
-      } catch (err) {
-        console.error("[handleSend] Erro ao enviar enquanto online:", err);
-      }
-    } else {
-      console.log("[handleSend] Offline → ficará pendente:", msg.id);
+      try { await sendMessage.mutateAsync(msg); }
+      catch (err) { console.error("[handleSend] Erro ao enviar:", err); }
     }
   };
 
-  const handleLogout = async () => {
-    console.log("[Logout] Iniciando logout...");
-    await logout();
-    console.log("[Logout] Usuário deslogado!");
-  };
+  const handleLogout = async () => { await logout(); };
 
   return (
     <div style={{ maxWidth: 400, margin: "40px auto" }}>
@@ -146,27 +169,15 @@ export default function MessageUI() {
         </strong>
       </p>
 
-      <div style={{
-        height: 250,
-        overflowY: "auto",
-        padding: 10,
-        border: "1px solid #ccc"
-      }}>
+      <div style={{ height: 250, overflowY: "auto", padding: 10, border: "1px solid #ccc" }}>
         {messages.map((m) => (
           <div key={m.id} style={{
             marginBottom: 8,
             padding: 8,
-            borderLeft: m.pending === 1
-              ? "4px solid orange"
-              : "4px solid green",
+            borderLeft: m.pending === 1 ? "4px solid orange" : "4px solid green",
           }}>
             {m.content}
-
-            {m.pending === 1 && (
-              <small style={{ color: "orange" }}>
-                ⏳ Enviando quando online...
-              </small>
-            )}
+            {m.pending === 1 && <small style={{ color: "orange" }}>⏳ Enviando quando online...</small>}
           </div>
         ))}
       </div>
