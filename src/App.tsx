@@ -13,12 +13,14 @@ function useSendMessage() {
     mutationFn: sendMessageSupabase,
     onSuccess: async (serverMsg, originalMsg) => {
       await db.messages.update(originalMsg.id, {
-        pending: 0,
+        pending: 0, // sucesso → não pendente
         created_at: serverMsg.created_at ?? originalMsg.created_at,
       });
     },
-    onError: (err, originalMsg) => {
-      console.error("[useSendMessage] ERRO enviando:", err, originalMsg.id);
+    onError: async (_err, originalMsg) => {
+      console.error("[useSendMessage] ERRO enviando:", originalMsg.id);
+      // mantém pendente
+      await db.messages.update(originalMsg.id, { pending: 1 });
     },
   });
 }
@@ -139,15 +141,20 @@ export default function MessageUI() {
       content: text,
       client_created_at: now,
       created_at: now,
-      pending: online ? 0 : 1,
+      pending: online ? 0 : 1, // já offline → pendente
     };
 
+    // salva localmente imediatamente
     await db.messages.add(msg);
     setText("");
 
     if (online) {
-      try { await sendMessage.mutateAsync(msg); }
-      catch (err) { console.error("[handleSend] Erro ao enviar:", err); }
+      try {
+        await sendMessage.mutateAsync(msg);
+      } catch (err) {
+        console.error("[handleSend] Falha ao enviar, mensagem marcada como pendente", msg.id);
+        // a onError do useMutation já marcou pending = 1
+      }
     }
   };
 
