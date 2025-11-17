@@ -12,7 +12,7 @@ import { reconcileServerMessage } from "./services/reconcileMessage";
 function useSendMessage() {
   return useMutation({
     mutationFn: sendMessageSupabase,
-    onSuccess: async (serverMsg, originalMsg) => {
+    onSuccess: async (serverMsg) => {
       console.log("[useSendMessage] Sucesso, reconciliando...");
 
       await reconcileServerMessage(serverMsg);
