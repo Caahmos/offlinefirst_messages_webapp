@@ -18,15 +18,21 @@ export async function syncMessagesFromServer(user_id: string) {
 
   console.log(`[syncMessages] ${data.length} mensagens encontradas`);
 
-  // Salva localmente no Dexie, evitando duplicatas
   for (const msg of data) {
-    await db.messages.put({
+    const exists = await db.messages.get(msg.id);
+    if (exists) {
+      // Já existe → NÃO insere novamente
+      continue;
+    }
+
+    await db.messages.add({
       id: msg.id,
       user_id: msg.user_id,
       content: msg.content,
       client_created_at: msg.client_created_at,
       created_at: msg.created_at,
-      pending: 0, // já foram enviadas
+      offline_id: msg.offline_id,
+      pending: 0,
     });
   }
 
