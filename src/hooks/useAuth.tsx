@@ -1,10 +1,10 @@
-// src/auth/useAuth.tsx
+// src/hooks/useAuth.tsx
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "../supabaseClient";
 import { syncMessagesFromServer } from "../services/syncMessages";
 
-interface UserProfile {
+export interface UserProfile {
   user_id: string;
   username: string | null;
   email: string;
@@ -30,18 +30,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [initialLoading, setInitialLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
+  // 🔹 Restaurar sessão offline ou online
   useEffect(() => {
     const loadSession = async () => {
       console.log("[Auth] Restaurando sessão...");
-      const { data } = await supabase.auth.getSession();
-      const sessionUser = data.session?.user;
 
-      if (sessionUser) {
-        console.log("[Auth] Sessão encontrada:", sessionUser);
-        setUser(sessionUser);
-        await fetchUserProfile(sessionUser.id, sessionUser.email ?? "");
-      } else {
-        console.log("[Auth] Nenhuma sessão ativa encontrada.");
+      // 1️⃣ Tenta restaurar do localStorage (offline)
+      const stored = localStorage.getItem("offlineUser");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        console.log("[Auth] Sessão offline encontrada:", parsed.user);
+        setUser(parsed.user);
+        setUserData(parsed.userData);
+        setInitialLoading(false);
+        return;
+      }
+
+      // 2️⃣ Fallback online (Supabase)
+      try {
+        const { data } = await supabase.auth.getSession();
+        const sessionUser = data.session?.user;
+
+        if (sessionUser) {
+          console.log("[Auth] Sessão online encontrada:", sessionUser);
+          setUser(sessionUser);
+          await fetchUserProfile(sessionUser.id, sessionUser.email ?? "");
+        }
+      } catch (err) {
+        console.warn("[Auth] Não foi possível restaurar sessão online:", err);
       }
 
       setInitialLoading(false);
@@ -49,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     loadSession();
 
+    // 🔹 Listener de authStateChange para atualizar sessão
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const authUser = session?.user;
       if (authUser) {
@@ -59,32 +76,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("[Auth] Evento authStateChange - logout detectado");
         setUser(null);
         setUserData(null);
+        localStorage.removeItem("offlineUser");
       }
     });
 
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // 🔹 Busca perfil do usuário no Supabase
   const fetchUserProfile = async (id: string, email: string) => {
-    console.log(`[Auth] Buscando perfil do usuário: ${id}`);
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("username, avatar_url")
-      .eq("id", id)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("username, avatar_url")
+        .eq("id", id)
+        .single();
 
-    if (error) {
-      console.warn("[Auth] Nenhum perfil encontrado, criando dados mínimos.");
-      setUserData({ user_id: id, username: null, email, avatar_url: null });
-      return;
+      if (error || !data) {
+        console.warn("[Auth] Nenhum perfil encontrado, criando dados mínimos.");
+        const minimalProfile: UserProfile = { user_id: id, username: null, email, avatar_url: null };
+        setUserData(minimalProfile);
+        localStorage.setItem("offlineUser", JSON.stringify({ user, userData: minimalProfile }));
+        return minimalProfile;
+      }
+
+      const profile: UserProfile = {
+        user_id: id,
+        username: data.username,
+        email,
+        avatar_url: data.avatar_url,
+      };
+      setUserData(profile);
+
+      // Salva offline
+      localStorage.setItem("offlineUser", JSON.stringify({ user, userData: profile }));
+
+      return profile;
+    } catch (err) {
+      console.error("[Auth] Erro ao buscar perfil:", err);
+      return null;
     }
-
-    console.log("[Auth] Perfil encontrado:", data);
-    setUserData({ user_id: id, username: data.username, email, avatar_url: data.avatar_url });
   };
 
+  // 🔹 Verifica se email é permitido (ex: whitelist)
   async function checkAllowedEmail(email: string) {
-    console.log("[Auth] Verificando se email é permitido:", email);
     try {
       const res = await fetch(
         "https://tkbniovizqwiqdapiqbr.supabase.co/functions/v1/pre_signedup_allowed",
@@ -94,9 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ email }),
         }
       );
-
       const data = await res.json();
-      console.log("[Auth] Resposta da função pre_signedup_allowed:", data);
       if (!res.ok) throw new Error(data.error || "Erro desconhecido");
       return data.allowed;
     } catch (err: any) {
@@ -105,10 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // 🔹 Login
   const login = async (email: string, password: string) => {
-    console.log("[Auth] Tentativa de login:", email);
     setAuthLoading(true);
-
     try {
       const allowed = await checkAllowedEmail(email);
       if (!allowed) throw new Error("Seu email não tem permissão para logar.");
@@ -117,19 +149,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       if (!data.user) throw new Error("Usuário não retornado.");
 
-      console.log("[Auth] Login bem-sucedido:", data.user);
       setUser(data.user);
-      await fetchUserProfile(data.user.id, email);
+      const profile = await fetchUserProfile(data.user.id, email);
+
+      // Sincroniza mensagens do servidor
       await syncMessagesFromServer(data.user.id);
+
+      // Salva offline
+      localStorage.setItem("offlineUser", JSON.stringify({ user: data.user, userData: profile }));
     } finally {
       setAuthLoading(false);
     }
   };
 
+  // 🔹 Registro
   const register = async (email: string, password: string, username: string) => {
-    console.log("[Auth] Tentativa de registro:", email);
     setAuthLoading(true);
-
     try {
       const allowed = await checkAllowedEmail(email);
       if (!allowed) throw new Error("Seu email não tem permissão para registrar.");
@@ -138,32 +173,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       if (!data.user) throw new Error("Erro ao registrar usuário.");
 
-      console.log("[Auth] Registro bem-sucedido, criando perfil:", data.user.id);
+      // Cria perfil
       await supabase.from("profiles").insert({ id: data.user.id, username, avatar_url: null });
 
-      await fetchUserProfile(data.user.id, email);
-      await syncMessagesFromServer(data.user.id);
       setUser(data.user);
+      const profile: UserProfile = { user_id: data.user.id, username, email, avatar_url: null };
+      setUserData(profile);
+
+      // Sincroniza mensagens
+      await syncMessagesFromServer(data.user.id);
+
+      // Salva offline
+      localStorage.setItem("offlineUser", JSON.stringify({ user: data.user, userData: profile }));
     } finally {
       setAuthLoading(false);
     }
   };
 
+  // 🔹 Logout
   const logout = async () => {
-    console.log("[Auth] Logout solicitado");
     setAuthLoading(true);
-
-    await supabase.auth.signOut();
-
-    setUser(null);
-    setUserData(null);
-
-    console.log("[Auth] Logout concluído");
-    setAuthLoading(false);
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setUserData(null);
+      localStorage.removeItem("offlineUser");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, userData, initialLoading, authLoading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        userData,
+        initialLoading,
+        authLoading,
+        login,
+        register,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

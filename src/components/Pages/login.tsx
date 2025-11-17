@@ -33,8 +33,8 @@ export default function Login() {
     >
       <h2 style={{ textAlign: "center", marginBottom: 20 }}>Entrar</h2>
 
-      <form onSubmit={handleLogin}>
-        <label style={{ display: "block", marginBottom: 8 }}>E-mail:</label>
+      <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 10}}>
+        <label style={{ display: "block" }}>E-mail:</label>
 
         <input
           type="email"
@@ -50,7 +50,7 @@ export default function Login() {
           }}
         />
 
-        <label style={{ display: "block", marginBottom: 8 }}>Senha:</label>
+        <label style={{ display: "block" }}>Senha:</label>
 
         <input
           type="password"
@@ -99,7 +99,7 @@ export default function Login() {
         >
           {authLoading ? "Entrando..." : "Entrar"}
         </button>
-        <Link style={{ paddingTop: 50 }} to="/register">Clque aqui para se registrar</Link>
+        <Link to="/register">Clque aqui para se registrar</Link>
       </form>
     </div>
   );

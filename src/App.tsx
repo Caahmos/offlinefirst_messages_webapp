@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { db, type Message } from "./db";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { useMessages } from "./hooks/useMessages";
@@ -29,6 +29,17 @@ export default function MessageUI() {
   const online = useOnlineStatus();
   const [text, setText] = useState("");
   const { logout, userData } = useAuth();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Sempre rola para o final quando messages mudam
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTo({
+        top: containerRef.current.scrollHeight,
+        behavior: "smooth", // ⚡ aqui está o scroll suave
+      });
+    }
+  }, [messages]);
 
   // 🔹 Testa conexão
   useEffect(() => { testConnection(); }, []);
@@ -169,15 +180,29 @@ export default function MessageUI() {
         </strong>
       </p>
 
-      <div style={{ height: 250, overflowY: "auto", padding: 10, border: "1px solid #ccc" }}>
+      <div
+        ref={containerRef}
+        style={{
+          height: 250,
+          overflowY: "auto",
+          padding: 10,
+          border: "1px solid #ccc",
+        }}
+      >
         {messages.map((m) => (
-          <div key={m.id} style={{
-            marginBottom: 8,
-            padding: 8,
-            borderLeft: m.pending === 1 ? "4px solid orange" : "4px solid green",
-          }}>
+          <div
+            key={m.id}
+            style={{
+              marginBottom: 8,
+              padding: 8,
+              borderLeft:
+                m.pending === 1 ? "4px solid orange" : "4px solid green",
+            }}
+          >
             {m.content}
-            {m.pending === 1 && <small style={{ color: "orange" }}>⏳ Enviando quando online...</small>}
+            {m.pending === 1 && (
+              <small style={{ color: "orange" }}>⏳ Enviando quando online...</small>
+            )}
           </div>
         ))}
       </div>
