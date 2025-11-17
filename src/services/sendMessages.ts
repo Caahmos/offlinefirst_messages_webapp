@@ -3,12 +3,14 @@ import { supabase } from "../supabaseClient";
 export async function sendMessageSupabase(msg: any) {
   console.log("📤 Enviando mensagem para Supabase:", msg);
 
-  // Tirar apenas campos que nunca devem ir para Supabase
+  // ❗ Remover campos que não devem ir
   const { id, pending, ...clean } = msg;
 
+  // ❗ Garantir que offline_id SEMPRE vai pro Supabase
+  // É a única forma de identificar a mensagem e evitar duplicação
   const payload = {
     ...clean,
-    offline_id: id, // <-- SEMPRE manda o ID local como offline_id
+    offline_id: msg.offline_id,
     delivered: true,
   };
 
