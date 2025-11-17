@@ -12,15 +12,24 @@ function useSendMessage() {
   return useMutation({
     mutationFn: sendMessageSupabase,
     onSuccess: async (serverMsg, originalMsg) => {
+      // Sucesso → marca como enviado
       await db.messages.update(originalMsg.id, {
-        pending: 0, // sucesso → não pendente
+        pending: 0,
         created_at: serverMsg.created_at ?? originalMsg.created_at,
       });
     },
-    onError: async (_err, originalMsg) => {
-      console.error("[useSendMessage] ERRO enviando:", originalMsg.id);
-      // mantém pendente
-      await db.messages.update(originalMsg.id, { pending: 1 });
+    onError: async (err, originalMsg) => {
+      if (!navigator.onLine) {
+        // Offline → mantém pendente
+        await db.messages.update(originalMsg.id, { pending: 1 });
+      } else {
+        // Online mas erro → não marca como pendente, vamos esperar Realtime atualizar
+        console.error(
+          "[useSendMessage] Erro enviando online, esperando Realtime:",
+          originalMsg.id,
+          err
+        );
+      }
     },
   });
 }
@@ -71,9 +80,9 @@ export default function MessageUI() {
     fetchMessages();
   }, [userData]);
 
-  // 🔹 Realtime listener
+
+  // função async interna
   useEffect(() => {
-    // função async interna
     const fetchData = async () => {
       const { data, error } = await supabase.auth.getSession();
       if (error) {
@@ -89,12 +98,12 @@ export default function MessageUI() {
     fetchData(); // chama a função async
   }, []);
 
+  // 🔹 Realtime listener
   useEffect(() => {
     if (!userData) return;
 
-    // Cria o canal
     const channel = supabase
-      .channel("public:messages") // nome do canal, pode ser qualquer string
+      .channel("public:messages")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
@@ -103,16 +112,35 @@ export default function MessageUI() {
 
           console.log("[Realtime] Nova mensagem recebida:", newMsg);
 
-          // Salva no Dexie se ainda não existe
-          const exists = await db.messages.get(newMsg.id);
-          if (!exists) {
+          // 1. Tenta achar no DB local pelo server ID
+          const existsByServerId = await db.messages.get(newMsg.id);
+
+          // 2. Tenta achar mensagem local pelo offline_id
+          const existsByOfflineId = await db.messages
+            .where("id")
+            .equals(newMsg.offline_id)
+            .first();
+
+          if (existsByOfflineId) {
+            // 🔄 RECONCILIA: substitui a versão offline pela versão do servidor
+            await db.messages.delete(existsByOfflineId.id);
+
+            await db.messages.add({
+              ...newMsg,
+              pending: 0,
+            });
+
+            return;
+          }
+
+          if (!existsByServerId) {
+            // Mensagem nova de outro usuário
             await db.messages.add({ ...newMsg, pending: 0 });
           }
         }
       )
       .subscribe();
 
-    // Cleanup
     return () => {
       supabase.removeChannel(channel);
     };
@@ -135,11 +163,13 @@ export default function MessageUI() {
     if (!text.trim()) return;
 
     const now = new Date().toISOString();
+    const newID = crypto.randomUUID()
     const msg: Message = {
-      id: crypto.randomUUID(),
+      id: newID,
       user_id: userData?.user_id as string,
       content: text,
       client_created_at: now,
+      offline_id: newID,
       created_at: now,
       pending: online ? 0 : 1, // já offline → pendente
     };

@@ -6,6 +6,7 @@ export interface Message {
   user_id: string;
   content: string;
   created_at: string;
+  offline_id: string;
   client_created_at: string; // PRECISA estar no schema
   pending: 0 | 1;
 }
