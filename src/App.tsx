@@ -7,25 +7,22 @@ import { sendMessageSupabase } from "./services/sendMessages";
 import { testConnection } from "./services/testSupabseConection";
 import { useAuth } from "./hooks/useAuth";
 import { supabase } from "./supabaseClient";
+import { reconcileServerMessage } from "./services/reconcileMessage";
 
 function useSendMessage() {
   return useMutation({
     mutationFn: sendMessageSupabase,
     onSuccess: async (serverMsg, originalMsg) => {
-      // Sucesso → marca como enviado
-      await db.messages.update(originalMsg.id, {
-        pending: 0,
-        created_at: serverMsg.created_at ?? originalMsg.created_at,
-      });
+      console.log("[useSendMessage] Sucesso, reconciliando...");
+
+      await reconcileServerMessage(serverMsg);
     },
     onError: async (err, originalMsg) => {
       if (!navigator.onLine) {
-        // Offline → mantém pendente
         await db.messages.update(originalMsg.id, { pending: 1 });
       } else {
-        // Online mas erro → não marca como pendente, vamos esperar Realtime atualizar
         console.error(
-          "[useSendMessage] Erro enviando online, esperando Realtime:",
+          "[useSendMessage] Erro enviando online, aguardando Realtime:",
           originalMsg.id,
           err
         );
@@ -69,8 +66,7 @@ export default function MessageUI() {
         if (error) throw error;
 
         for (const msg of data) {
-          const exists = await db.messages.get(msg.id);
-          if (!exists) await db.messages.add({ ...msg, pending: 0 });
+          await reconcileServerMessage(msg);
         }
       } catch (err) {
         console.error("[fetchMessages] Erro:", err);
@@ -79,7 +75,6 @@ export default function MessageUI() {
 
     fetchMessages();
   }, [userData]);
-
 
   // função async interna
   useEffect(() => {
@@ -112,31 +107,7 @@ export default function MessageUI() {
 
           console.log("[Realtime] Nova mensagem recebida:", newMsg);
 
-          // 1. Tenta achar no DB local pelo server ID
-          const existsByServerId = await db.messages.get(newMsg.id);
-
-          // 2. Tenta achar mensagem local pelo offline_id
-          const existsByOfflineId = await db.messages
-            .where("id")
-            .equals(newMsg.offline_id)
-            .first();
-
-          if (existsByOfflineId) {
-            // 🔄 RECONCILIA: substitui a versão offline pela versão do servidor
-            await db.messages.delete(existsByOfflineId.id);
-
-            await db.messages.add({
-              ...newMsg,
-              pending: 0,
-            });
-
-            return;
-          }
-
-          if (!existsByServerId) {
-            // Mensagem nova de outro usuário
-            await db.messages.add({ ...newMsg, pending: 0 });
-          }
+          await reconcileServerMessage(newMsg);
         }
       )
       .subscribe();
